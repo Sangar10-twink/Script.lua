@@ -1,224 +1,173 @@
--- One Tap: Cosmic Case Auto-Buy
+-- One Tap: Cosmic Case Auto-Buy (улучшенный - ловит появление GUI)
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 
 print("=" .. string.rep("=", 50))
-print("  ONE TAP: COSMIC CASE AUTO-BUY")
+print("  ONE TAP: COSMIC CASE AUTO-BUY v2")
 print("=" .. string.rep("=", 50))
-print("ОТКРОЙ GUI Cosmic Case и скрипт найдёт кнопки!")
+print("Скрипт активен! Открой меню Cosmic Case...")
 
--- Ждём появления GUI кейса
-local caseGui = nil
-local maxWait = 30 -- ждём 30 секунд
-local waited = 0
+-- Хранилище найденных кнопок
+local foundButtons = {
+    buy10 = nil,
+    buy1 = nil,
+    buy10robux = nil,
+    close = nil
+}
 
-while not caseGui and waited < maxWait do
-    -- Ищем во всех ScreenGui
-    for _, gui in ipairs(player.PlayerGui:GetChildren()) do
-        if gui:IsA("ScreenGui") or gui:IsA("Folder") then
-            for _, obj in ipairs(gui:GetDescendants()) do
-                -- Ищем по тексту "Cosmic" или по цене 20000
-                if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-                    local txt = obj.Text or ""
-                    if txt:find("Cosmic") or txt:find("20000") or txt:find("2000") then
-                        caseGui = gui
-                        print("\n[GUI НАЙДЕНО] Путь:", gui:GetFullName())
-                        print("  Триггер:", obj.Name, "=", txt)
-                        break
-                    end
+-- Функция клика
+local function clickButton(btn)
+    if not btn then return false end
+    local ok = false
+    pcall(function() btn.MouseButton1Click:Fire() ok = true end)
+    pcall(function() for _,c in ipairs(getconnections(btn.MouseButton1Click)) do if c.Function then c.Function() ok=true end end end)
+    pcall(function() for _,c in ipairs(getconnections(btn.Activated)) do if c.Function then c.Function() ok=true end end end)
+    return ok
+end
+
+-- Сканируем объект и его детей на наличие кнопок кейса
+local function scanForCaseButtons(parent, depth)
+    depth = depth or 0
+    if depth > 5 then return end -- не уходим слишком глубоко
+    
+    for _, obj in ipairs(parent:GetChildren()) do
+        if obj:IsA("TextButton") or obj:IsA("ImageButton") then
+            local txt = ""
+            if obj:IsA("TextButton") then txt = obj.Text or "" end
+            
+            -- Проверяем по тексту и имени
+            local txtLow = txt:lower()
+            local nameLow = obj.Name:lower()
+            
+            -- Buy 10 за деньги ($20000)
+            if (txt:find("20000") or txt:find("20") and txt:find("000")) and not txt:find("2000") then
+                if not foundButtons.buy10 then
+                    foundButtons.buy10 = obj
+                    print("\n[✓] НАЙДЕНА КНОПКА Buy 10 ($20000):")
+                    print("    Имя:", obj.Name)
+                    print("    Текст:", txt)
+                    print("    Путь:", obj:GetFullName())
                 end
             end
-            if caseGui then break end
-        end
-    end
-    
-    if not caseGui then
-        task.wait(1)
-        waited = waited + 1
-        if waited % 5 == 0 then
-            print("  Ждём GUI... (", waited, "/", maxWait, ")")
-        end
-    end
-end
-
-if not caseGui then
-    print("! GUI Cosmic Case не найдено за 30 секунд")
-    print("Убедись, что открыл меню кейсов!")
-    return
-end
-
--- Сканируем все кнопки в найденном GUI
-print("\n[СКАНИРОВАНИЕ КНОПОК]:")
-local allButtons = {}
-for _, obj in ipairs(caseGui:GetDescendants()) do
-    if obj:IsA("TextButton") or obj:IsA("ImageButton") then
-        local txt = ""
-        if obj:IsA("TextButton") then txt = obj.Text end
-        
-        print("  Кнопка:", obj.Name)
-        print("    Текст:", txt ~= "" and txt or "[ImageButton]")
-        print("    Путь:", obj:GetFullName())
-        
-        table.insert(allButtons, {
-            btn = obj,
-            text = txt,
-            path = obj:GetFullName()
-        })
-    end
-end
-
--- Находим конкретно кнопку Buy 10 за $20000
-local buy10Btn = nil
-local buy1Btn = nil
-local closeBtn = nil
-
-for _, info in ipairs(allButtons) do
-    local txt = info.text:lower()
-    local name = info.btn.Name:lower()
-    
-    -- Ищем Buy 10 / 20000
-    if txt:find("20000") or txt:find("20") and txt:find("000") 
-       or name:find("buy10") or name:find("buy_10") or name:find("ten") then
-        buy10Btn = info.btn
-        print("\n[>> НАЙДЕНА КНОПКА BUY 10]:", info.btn.Name)
-    end
-    
-    -- Ищем Buy 1 / 2000
-    if txt:find("2000") and not txt:find("20000")
-       or name:find("buy1") or name:find("buy_1") then
-        buy1Btn = info.btn
-        print("\n[>> НАЙДЕНА КНОПКА BUY 1]:", info.btn.Name)
-    end
-    
-    -- Ищем Close
-    if txt:find("close") or name:find("close") then
-        closeBtn = info.btn
-        print("\n[>> НАЙДЕНА КНОПКА CLOSE]:", info.btn.Name)
-    end
-end
-
--- === ФУНКЦИИ ДЛЯ КОНСОЛИ ===
-
--- Кликнуть по кнопке всеми возможными способами
-local function clickButton(btn)
-    local success = false
-    
-    -- Способ 1: Стандартный Fire
-    pcall(function()
-        btn.MouseButton1Click:Fire()
-        success = true
-    end)
-    
-    -- Способ 2: Activated
-    pcall(function()
-        if btn:FindFirstChild("Activated") then
-            btn.Activated:Fire()
-            success = true
-        end
-    end)
-    
-    -- Способ 3: Через connections
-    pcall(function()
-        for _, conn in ipairs(getconnections(btn.MouseButton1Click)) do
-            if conn.Function then
-                conn.Function()
-                success = true
+            
+            -- Buy 1 за деньги ($2000)
+            if txt:find("2000") and not txt:find("20000") then
+                if not foundButtons.buy1 then
+                    foundButtons.buy1 = obj
+                    print("\n[✓] НАЙДЕНА КНОПКА Buy 1 ($2000):")
+                    print("    Имя:", obj.Name)
+                    print("    Текст:", txt)
+                end
+            end
+            
+            -- Buy 10 за робуксы (1000 R$)
+            if txt:find("1000") and (txt:find("R%$") or txt:find("RS") or txt:find("R ")) then
+                if not foundButtons.buy10robux then
+                    foundButtons.buy10robux = obj
+                    print("\n[✓] НАЙДЕНА КНОПКА Buy 10 (1000 R$):")
+                    print("    Имя:", obj.Name)
+                    print("    Текст:", txt)
+                end
+            end
+            
+            -- Close
+            if txtLow:find("close") or nameLow:find("close") then
+                if not foundButtons.close then
+                    foundButtons.close = obj
+                    print("\n[✓] НАЙДЕНА КНОПКА Close:")
+                    print("    Имя:", obj.Name)
+                end
             end
         end
-    end)
-    
-    -- Способ 4: Через Activated connections
-    pcall(function()
-        for _, conn in ipairs(getconnections(btn.Activated)) do
-            if conn.Function then
-                conn.Function()
-                success = true
-            end
-        end
-    end)
-    
-    return success
+        
+        -- Рекурсивно сканируем детей
+        scanForCaseButtons(obj, depth + 1)
+    end
 end
 
--- Авто-покупка Buy 10
-_G.autoBuy10 = function(count, delay)
+-- Слушаем появление новых объектов в PlayerGui
+player.PlayerGui.DescendantAdded:Connect(function(obj)
+    -- Если появляется что-то связанное с кейсами
+    local name = obj.Name:lower()
+    if name:find("case") or name:find("cosmic") or name:find("buy") 
+       or name:find("open") or name:find("20000") or name:find("2000") then
+        task.wait(0.1) -- даём время на загрузку текста
+        scanForCaseButtons(obj.Parent)
+    end
+end)
+
+-- Также периодически сканируем всё PlayerGui
+task.spawn(function()
+    while true do
+        scanForCaseButtons(player.PlayerGui)
+        task.wait(2)
+    end
+end)
+
+-- === КОМАНДЫ ===
+
+_G.buyCosmic10 = function(count, delay)
     count = count or 10
     delay = delay or 0.5
     
-    if not buy10Btn then
-        print("! Кнопка Buy 10 ($20000) не найдена!")
-        print("Возможные кнопки:")
-        for _, info in ipairs(allButtons) do
-            print("  -", info.btn.Name, ":", info.text)
-        end
+    if not foundButtons.buy10 then
+        print("! Кнопка Buy 10 ($20000) ещё не найдена!")
+        print("Открой меню Cosmic Case сначала.")
         return
     end
     
-    print("\nПокупаем", count, "раз по 10 кейсов Cosmic...")
-    print("Цена за раз: $20000")
-    print("Общая цена: $" .. (count * 20000))
+    print("\n>>> Покупаем", count, "раз по 10 кейсов Cosmic...")
+    print(">>> Всего будет куплено:", count * 10, "кейсов")
     
     for i = 1, count do
-        local ok = clickButton(buy10Btn)
-        if ok then
-            print("  [", i, "/", count, "] Успешно")
-        else
-            print("  [", i, "/", count, "] Не удалось кликнуть")
-        end
+        local ok = clickButton(foundButtons.buy10)
+        print("  [" .. i .. "/" .. count .. "]", ok and "✓" or "✗")
         task.wait(delay)
     end
     
-    print("Готово! Куплено кейсов:", count * 10)
+    print(">>> Готово!")
 end
 
--- Авто-покупка Buy 1 (если мало денег)
-_G.autoBuy1 = function(count, delay)
+_G.buyCosmic1 = function(count, delay)
     count = count or 50
     delay = delay or 0.3
     
-    if not buy1Btn then
-        print("! Кнопка Buy 1 ($2000) не найдена!")
+    if not foundButtons.buy1 then
+        print("! Кнопка Buy 1 ($2000) ещё не найдена!")
         return
     end
     
-    print("\nПокупаем", count, "раз по 1 кейсу Cosmic...")
-    
+    print("\n>>> Покупаем", count, "одиночных кейсов...")
     for i = 1, count do
-        clickButton(buy1Btn)
-        if i % 10 == 0 then
-            print("  Куплено:", i, "/", count)
-        end
+        clickButton(foundButtons.buy1)
+        if i % 10 == 0 then print("  Куплено:", i) end
         task.wait(delay)
     end
-    
-    print("Готово! Куплено кейсов:", count)
+    print(">>> Готово!")
 end
 
--- Закрыть GUI
-_G.closeCase = function()
-    if closeBtn then
-        clickButton(closeBtn)
+_G.closeCosmic = function()
+    if foundButtons.close then
+        clickButton(foundButtons.close)
         print("GUI закрыто")
     else
         print("! Кнопка Close не найдена")
     end
 end
 
--- Показать текущие деньги
-_G.showMoney = function()
-    for _, gui in ipairs(player.PlayerGui:GetChildren()) do
-        for _, obj in ipairs(gui:GetDescendants()) do
-            if obj:IsA("TextLabel") and (obj.Name:lower():find("money") or obj.Text:find("%$")) then
-                print(obj.Name, ":", obj.Text, "|", obj:GetFullName())
-            end
-        end
-    end
+_G.status = function()
+    print("\n[СТАТУС КНОПОК]:")
+    print("  Buy 10 ($20000):", foundButtons.buy10 and "НАЙДЕНА (" .. foundButtons.buy10.Name .. ")" or "НЕТ")
+    print("  Buy 1 ($2000):", foundButtons.buy1 and "НАЙДЕНА (" .. foundButtons.buy1.Name .. ")" or "НЕТ")
+    print("  Buy 10 (1000 R$):", foundButtons.buy10robux and "НАЙДЕНА" or "НЕТ")
+    print("  Close:", foundButtons.close and "НАЙДЕНА" or "НЕТ")
 end
 
 print("\n" .. string.rep("=", 52))
-print("КОМАНДЫ (вводи в консоли F9):")
-print("  autoBuy10(20, 0.5)   -- купить 20 раз по 10 кейсов")
-print("  autoBuy1(100, 0.3)   -- купить 100 одиночных кейсов")
-print("  closeCase()          -- закрыть GUI")
-print("  showMoney()          -- показать деньги")
+print("КОМАНДЫ:")
+print("  status()             -- проверить, найдены ли кнопки")
+print("  buyCosmic10(20)      -- купить 20 раз по 10 кейсов")
+print("  buyCosmic1(100)      -- купить 100 одиночных")
+print("  closeCosmic()        -- закрыть меню")
 print(string.rep("=", 52))
+print("Открой Cosmic Case в игре и введи status()")
