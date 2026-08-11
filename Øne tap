@@ -1,173 +1,278 @@
--- One Tap: Cosmic Case Auto-Buy (улучшенный - ловит появление GUI)
+-- One Tap: MAXIMUM EDITION (ESP + Aim + Auto-Farm)
+-- Только для твинка — риск бана есть всегда
+
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Camera = Workspace.CurrentCamera
 local player = Players.LocalPlayer
 
 print("=" .. string.rep("=", 50))
-print("  ONE TAP: COSMIC CASE AUTO-BUY v2")
+print("  ONE TAP: MAXIMUM EDITION")
 print("=" .. string.rep("=", 50))
-print("Скрипт активен! Открой меню Cosmic Case...")
 
--- Хранилище найденных кнопок
-local foundButtons = {
-    buy10 = nil,
-    buy1 = nil,
-    buy10robux = nil,
-    close = nil
+-- ========== НАСТРОЙКИ ==========
+local SETTINGS = {
+    espEnabled = true,           -- видеть сквозь стены
+    aimEnabled = true,           -- автоприцел
+    autoShoot = true,            -- авто-стрельба
+    wallbang = true,             -- стрелять сквозь стены
+    autoFarmEvents = true,       -- сбор ивентов/квестов
+    aimSmooth = 0.15,            -- плавность прицела (0.1 = быстро, 0.5 = медленно)
+    aimFov = 200,                -- радиус захвата (пиксели)
+    targetBots = true,           -- целиться только в ботов
+    targetPlayers = false,       -- целиться в игроков (опасно)
+    maxDistance = 500,           -- макс дистанция
+    espColor = Color3.fromRGB(255, 0, 0), -- цвет ESP
+    botTag = "Bot",              -- как отличать ботов (по имени/тегу)
 }
 
--- Функция клика
-local function clickButton(btn)
-    if not btn then return false end
-    local ok = false
-    pcall(function() btn.MouseButton1Click:Fire() ok = true end)
-    pcall(function() for _,c in ipairs(getconnections(btn.MouseButton1Click)) do if c.Function then c.Function() ok=true end end end)
-    pcall(function() for _,c in ipairs(getconnections(btn.Activated)) do if c.Function then c.Function() ok=true end end end)
-    return ok
+-- ========== ESP СИСТЕМА ==========
+local espObjects = {}
+
+local function createESP(character)
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local head = character:FindFirstChild("Head")
+    if not humanoid or not head then return end
+    
+    -- Проверяем, бот ли это
+    local isBot = false
+    local nameTag = character:FindFirstChild("NameTag") or head:FindFirstChild("NameTag")
+    if nameTag and nameTag:IsA("BillboardGui") then
+        local text = nameTag:FindFirstChildOfClass("TextLabel")
+        if text and (text.Text:find("Bot") or text.Text:find("NPC")) then
+            isBot = true
+        end
+    end
+    
+    -- Если целимся только в ботов, а это игрок — пропускаем
+    if SETTINGS.targetBots and not isBot then return end
+    if not SETTINGS.targetPlayers and not isBot then return end
+    
+    -- Создаём ESP рамку
+    local box = Instance.new("BoxHandleAdornment")
+    box.Size = character:GetExtentsSize()
+    box.Color3 = SETTINGS.espColor
+    box.Transparency = 0.5
+    box.ZIndex = 10
+    box.AlwaysOnTop = true
+    box.Adornee = character
+    box.Parent = character
+    
+    -- Линия к цели
+    local line = Drawing.new("Line")
+    line.Visible = true
+    line.Color = SETTINGS.espColor
+    line.Thickness = 1
+    line.Transparency = 0.7
+    
+    espObjects[character] = {
+        box = box,
+        line = line,
+        isBot = isBot,
+        head = head
+    }
 end
 
--- Сканируем объект и его детей на наличие кнопок кейса
-local function scanForCaseButtons(parent, depth)
-    depth = depth or 0
-    if depth > 5 then return end -- не уходим слишком глубоко
+-- Обновление ESP
+RunService.RenderStepped:Connect(function()
+    for char, data in pairs(espObjects) do
+        if not char or not char.Parent then
+            if data.line then data.line:Remove() end
+            espObjects[char] = nil
+            continue
+        end
+        
+        local headPos = data.head and data.head.Position
+        if headPos then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(headPos)
+            if onScreen then
+                data.line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                data.line.To = Vector2.new(screenPos.X, screenPos.Y)
+                data.line.Visible = true
+            else
+                data.line.Visible = false
+            end
+        end
+    end
+end)
+
+-- Следим за новыми персонажами
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= player and p.Character then
+        createESP(p.Character)
+    end
+    p.CharacterAdded:Connect(function(char)
+        task.wait(1) -- даём загрузиться
+        createESP(char)
+    end)
+end
+
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function(char)
+        task.wait(1)
+        createESP(char)
+    end)
+end)
+
+-- ========== AIMBOT ==========
+local function getClosestTarget()
+    local closest = nil
+    local closestDist = SETTINGS.aimFov
+    local mousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
-    for _, obj in ipairs(parent:GetChildren()) do
-        if obj:IsA("TextButton") or obj:IsA("ImageButton") then
-            local txt = ""
-            if obj:IsA("TextButton") then txt = obj.Text or "" end
-            
-            -- Проверяем по тексту и имени
-            local txtLow = txt:lower()
-            local nameLow = obj.Name:lower()
-            
-            -- Buy 10 за деньги ($20000)
-            if (txt:find("20000") or txt:find("20") and txt:find("000")) and not txt:find("2000") then
-                if not foundButtons.buy10 then
-                    foundButtons.buy10 = obj
-                    print("\n[✓] НАЙДЕНА КНОПКА Buy 10 ($20000):")
-                    print("    Имя:", obj.Name)
-                    print("    Текст:", txt)
-                    print("    Путь:", obj:GetFullName())
-                end
+    for char, data in pairs(espObjects) do
+        if not char or not char.Parent then continue end
+        if not data.head then continue end
+        
+        local headPos = data.head.Position
+        local distance = (player.Character and player.Character:FindFirstChild("HumanoidRootPart") 
+            and (player.Character.HumanoidRootPart.Position - headPos).Magnitude or 0)
+        
+        if distance > SETTINGS.maxDistance then continue end
+        
+        local screenPos, onScreen = Camera:WorldToViewportPoint(headPos)
+        if not onScreen then continue end
+        
+        local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+        
+        if screenDist < closestDist then
+            closestDist = screenDist
+            closest = data.head
+        end
+    end
+    
+    return closest
+end
+
+RunService.RenderStepped:Connect(function()
+    if not SETTINGS.aimEnabled then return end
+    
+    local target = getClosestTarget()
+    if target then
+        local pos = Camera:WorldToViewportPoint(target.Position)
+        local mousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        local move = (Vector2.new(pos.X, pos.Y) - mousePos) * SETTINGS.aimSmooth
+        
+        -- Двигаем камеру
+        local currentCF = Camera.CFrame
+        local targetCF = CFrame.new(currentCF.Position, target.Position)
+        Camera.CFrame = currentCF:Lerp(targetCF, SETTINGS.aimSmooth)
+        
+        -- Авто-стрельба
+        if SETTINGS.autoShoot then
+            local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
+            if tool then
+                pcall(function()
+                    tool:Activate()
+                end)
             end
-            
-            -- Buy 1 за деньги ($2000)
-            if txt:find("2000") and not txt:find("20000") then
-                if not foundButtons.buy1 then
-                    foundButtons.buy1 = obj
-                    print("\n[✓] НАЙДЕНА КНОПКА Buy 1 ($2000):")
-                    print("    Имя:", obj.Name)
-                    print("    Текст:", txt)
-                end
-            end
-            
-            -- Buy 10 за робуксы (1000 R$)
-            if txt:find("1000") and (txt:find("R%$") or txt:find("RS") or txt:find("R ")) then
-                if not foundButtons.buy10robux then
-                    foundButtons.buy10robux = obj
-                    print("\n[✓] НАЙДЕНА КНОПКА Buy 10 (1000 R$):")
-                    print("    Имя:", obj.Name)
-                    print("    Текст:", txt)
-                end
-            end
-            
-            -- Close
-            if txtLow:find("close") or nameLow:find("close") then
-                if not foundButtons.close then
-                    foundButtons.close = obj
-                    print("\n[✓] НАЙДЕНА КНОПКА Close:")
-                    print("    Имя:", obj.Name)
+        end
+    end
+end)
+
+-- ========== АВТО-ФАРМ ИВЕНТОВ ==========
+local function findAndClick(textPattern, searchAllGui)
+    for _, gui in ipairs(player.PlayerGui:GetChildren()) do
+        for _, obj in ipairs(gui:GetDescendants()) do
+            if obj:IsA("TextButton") or obj:IsA("ImageButton") then
+                local txt = ""
+                if obj:IsA("TextButton") then txt = obj.Text or "" end
+                
+                if txt:lower():find(textPattern:lower()) or obj.Name:lower():find(textPattern:lower()) then
+                    -- Имитируем клик
+                    pcall(function()
+                        for _, conn in ipairs(getconnections(obj.MouseButton1Click)) do
+                            if conn.Function then conn.Function() end
+                        end
+                    end)
+                    pcall(function() obj.MouseButton1Click:Fire() end)
+                    return true, obj.Name, txt
                 end
             end
         end
-        
-        -- Рекурсивно сканируем детей
-        scanForCaseButtons(obj, depth + 1)
+    end
+    return false, nil, nil
+end
+
+-- Сбор всех наград
+local function collectAllRewards()
+    if not SETTINGS.autoFarmEvents then return end
+    
+    local collected = 0
+    
+    -- Playtime награды
+    local patterns = {"claim", "collect", "get", "reward", "complete", "500", "300", "100", "200"}
+    
+    for _, pattern in ipairs(patterns) do
+        local ok, name, txt = findAndClick(pattern)
+        if ok then
+            collected = collected + 1
+            print("[НАГРАДА] Собрано:", txt ~= "" and txt or name)
+            task.wait(random(0.5, 1.5))
+        end
+    end
+    
+    if collected > 0 then
+        print("Всего собрано наград:", collected)
     end
 end
 
--- Слушаем появление новых объектов в PlayerGui
-player.PlayerGui.DescendantAdded:Connect(function(obj)
-    -- Если появляется что-то связанное с кейсами
-    local name = obj.Name:lower()
-    if name:find("case") or name:find("cosmic") or name:find("buy") 
-       or name:find("open") or name:find("20000") or name:find("2000") then
-        task.wait(0.1) -- даём время на загрузку текста
-        scanForCaseButtons(obj.Parent)
-    end
-end)
+-- ========== КОМАНДЫ ==========
+_G.esp = function(on)
+    SETTINGS.espEnabled = on ~= false
+    print("ESP:", SETTINGS.espEnabled and "ON" or "OFF")
+end
 
--- Также периодически сканируем всё PlayerGui
+_G.aim = function(on)
+    SETTINGS.aimEnabled = on ~= false
+    print("Aimbot:", SETTINGS.aimEnabled and "ON" or "OFF")
+end
+
+_G.shoot = function(on)
+    SETTINGS.autoShoot = on ~= false
+    print("Auto-shoot:", SETTINGS.autoShoot and "ON" or "OFF")
+end
+
+_G.farm = function(on)
+    SETTINGS.autoFarmEvents = on ~= false
+    print("Auto-farm:", SETTINGS.autoFarmEvents and "ON" or "OFF")
+end
+
+_G.collect = function()
+    collectAllRewards()
+end
+
+_G.setFov = function(fov)
+    SETTINGS.aimFov = fov or 200
+    print("FOV:", SETTINGS.aimFov)
+end
+
+_G.setSmooth = function(smooth)
+    SETTINGS.aimSmooth = smooth or 0.15
+    print("Smooth:", SETTINGS.aimSmooth)
+end
+
+-- Авто-сбор каждые 30 секунд
 task.spawn(function()
     while true do
-        scanForCaseButtons(player.PlayerGui)
-        task.wait(2)
+        if SETTINGS.autoFarmEvents then
+            collectAllRewards()
+        end
+        task.wait(30)
     end
 end)
-
--- === КОМАНДЫ ===
-
-_G.buyCosmic10 = function(count, delay)
-    count = count or 10
-    delay = delay or 0.5
-    
-    if not foundButtons.buy10 then
-        print("! Кнопка Buy 10 ($20000) ещё не найдена!")
-        print("Открой меню Cosmic Case сначала.")
-        return
-    end
-    
-    print("\n>>> Покупаем", count, "раз по 10 кейсов Cosmic...")
-    print(">>> Всего будет куплено:", count * 10, "кейсов")
-    
-    for i = 1, count do
-        local ok = clickButton(foundButtons.buy10)
-        print("  [" .. i .. "/" .. count .. "]", ok and "✓" or "✗")
-        task.wait(delay)
-    end
-    
-    print(">>> Готово!")
-end
-
-_G.buyCosmic1 = function(count, delay)
-    count = count or 50
-    delay = delay or 0.3
-    
-    if not foundButtons.buy1 then
-        print("! Кнопка Buy 1 ($2000) ещё не найдена!")
-        return
-    end
-    
-    print("\n>>> Покупаем", count, "одиночных кейсов...")
-    for i = 1, count do
-        clickButton(foundButtons.buy1)
-        if i % 10 == 0 then print("  Куплено:", i) end
-        task.wait(delay)
-    end
-    print(">>> Готово!")
-end
-
-_G.closeCosmic = function()
-    if foundButtons.close then
-        clickButton(foundButtons.close)
-        print("GUI закрыто")
-    else
-        print("! Кнопка Close не найдена")
-    end
-end
-
-_G.status = function()
-    print("\n[СТАТУС КНОПОК]:")
-    print("  Buy 10 ($20000):", foundButtons.buy10 and "НАЙДЕНА (" .. foundButtons.buy10.Name .. ")" or "НЕТ")
-    print("  Buy 1 ($2000):", foundButtons.buy1 and "НАЙДЕНА (" .. foundButtons.buy1.Name .. ")" or "НЕТ")
-    print("  Buy 10 (1000 R$):", foundButtons.buy10robux and "НАЙДЕНА" or "НЕТ")
-    print("  Close:", foundButtons.close and "НАЙДЕНА" or "НЕТ")
-end
 
 print("\n" .. string.rep("=", 52))
 print("КОМАНДЫ:")
-print("  status()             -- проверить, найдены ли кнопки")
-print("  buyCosmic10(20)      -- купить 20 раз по 10 кейсов")
-print("  buyCosmic1(100)      -- купить 100 одиночных")
-print("  closeCosmic()        -- закрыть меню")
+print("  esp(false)      -- выключить ESP")
+print("  aim(false)      -- выключить аим")
+print("  shoot(false)    -- выключить авто-стрельбу")
+print("  farm(false)     -- выключить авто-фарм")
+print("  collect()       -- собрать награды сейчас")
+print("  setFov(300)     -- увеличить зону захвата")
+print("  setSmooth(0.3)  -- сделать аим медленнее (меньше палево)")
+print("\nВСЁ ВКЛЮЧЕНО ПО УМОЛЧАНИЮ!")
 print(string.rep("=", 52))
-print("Открой Cosmic Case в игре и введи status()")
