@@ -1,197 +1,156 @@
 --[[
-    ═══════════════════════════════════════════════════════════════
-    MM2 SUMMER FARM v11 FINAL | GUI + Headless | Xeno / UNC
-    Полноценная версия без ограничений по размеру
-    ═══════════════════════════════════════════════════════════════
+    MM2 FARM v11.1 | SAFE GUI | Без крашеров
+    Убрано: Set3dRenderingEnabled, Draggable, Active, Workspace:Destroy
 ]]
 
--- ═══════ КОНФИГ (переопределяется через _G.MM2Config) ═══════
+if _G.MM2v11Loaded then return end
+_G.MM2v11Loaded = true
+
 local Config = _G.MM2Config or {
-    FPSCap         = 15,
-    AutoStartDelay = 5,
-    RoundLimit     = 40,
-    DebugPrints    = true,
-    UseGUI         = true,      -- true = GUI, false = только консоль
-    AutoFarm       = false,     -- true = стартовать фарм сразу
+    FPSCap      = 15,
+    AutoFarm    = true,
+    DebugPrints = true,
     CoinFolderNames = {
         "CoinContainer", "Coins", "CoinSpawner", "Coins_Server",
         "Spawns", "SummerCoins", "EventCoins", "Coin_Server",
     },
 }
 
--- ═══════ ЗАЩИТА ОТ ПОВТОРНОГО ЗАПУСКА ═══════
-if _G.MM2v11Loaded then return end
-_G.MM2v11Loaded = true
+local Players   = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local Stats     = game:GetService("Stats")
+local player    = Players.LocalPlayer
 
--- ═══════ СЕРВИСЫ ═══════
-local Players      = game:GetService("Players")
-local Workspace    = game:GetService("Workspace")
-local Stats        = game:GetService("Stats")
-local RunService   = game:GetService("RunService")
-local Lighting     = game:GetService("Lighting")
-local player       = Players.LocalPlayer
+-- ═══════ GUI (БЕЗОПАСНЫЙ) ═══════
+local GUI = {}
 
--- ═══════ СОСТОЯНИЕ ═══════
-local State = {
-    Farming         = false,
-    RoundStartCoins = 0,
-    RoundCollected  = 0,
-    LastFolder      = nil,
-    IsLobby         = true,
-    HRP             = nil,
-    CPUOptimized    = false,
-    FPSOptimized    = false,
-    Noclip          = false,
-    PStand          = false,
-}
+pcall(function()
+    local hui = gethui()
+    local old = hui:FindFirstChild("MM2v11")
+    if old then old:Destroy() end
 
--- ═══════ ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ═══════
-_G.MM2Stop       = false
-_G.MM2Status     = "INIT"
-_G.MM2Round      = 0
-_G.MM2Total      = 0
-_G.MM2StartCoins = 0
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "MM2v11"
+    gui.ResetOnSpawn = false
+    gui.Parent = hui
+
+    local main = Instance.new("Frame")
+    main.Size = UDim2.new(0, 280, 0, 300)
+    main.Position = UDim2.new(0, 20, 0, 20)
+    main.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    main.BorderColor3 = Color3.fromRGB(0, 255, 128)
+    main.BorderSizePixel = 2
+    -- НЕТ Draggable, НЕТ Active — крашат при инжекте
+    main.Parent = gui
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 28)
+    title.BackgroundColor3 = Color3.fromRGB(0, 255, 128)
+    title.Text = "  MM2 v11.1 SAFE"
+    title.TextColor3 = Color3.fromRGB(0, 0, 0)
+    title.Font = Enum.Font.SourceSansBold
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = main
+
+    local function btn(txt, y, r, g, b)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, 240, 0, 30)
+        b.Position = UDim2.new(0, 20, 0, y)
+        b.BackgroundColor3 = Color3.fromRGB(r, g, b)
+        b.Text = txt
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.Font = Enum.Font.SourceSansBold
+        b.TextSize = 14
+        b.Parent = main
+        return b
+    end
+
+    local function lbl(txt, y, col)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(0, 240, 0, 18)
+        l.Position = UDim2.new(0, 20, 0, y)
+        l.BackgroundTransparency = 1
+        l.Text = txt
+        l.TextColor3 = col or Color3.fromRGB(255, 255, 255)
+        l.Font = Enum.Font.Code
+        l.TextSize = 13
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.Parent = main
+        return l
+    end
+
+    GUI.btnFarm   = btn("⏵ Farm: OFF", 35, 120, 40, 40)
+    GUI.btnFPS    = btn("📉 FPS: OFF", 70, 40, 100, 40)
+    GUI.btnPstand = btn("🧍 PStand: OFF", 105, 80, 60, 80)
+
+    GUI.lblStatus = lbl("Status: INIT", 145, Color3.fromRGB(0, 255, 128))
+    GUI.lblRound  = lbl("Round: 0/40", 165, Color3.fromRGB(255, 255, 0))
+    GUI.lblTotal  = lbl("Total: --", 185, Color3.fromRGB(0, 200, 255))
+    GUI.lblPing   = lbl("Ping: --", 205, Color3.fromRGB(200, 200, 200))
+    GUI.lblWarn   = lbl("NO CPU NUKE (crash fix)", 225, Color3.fromRGB(255, 100, 100))
+end)
 
 -- ═══════ ЛОГ ═══════
 local function log(...)
-    if Config.DebugPrints then
-        print("[MM2v11]", ...)
-    end
+    if Config.DebugPrints then print("[MM2v11.1]", ...) end
 end
 
--- ═══════ GUI ═══════
-local GUI = {}
+-- ═══════ СОСТОЯНИЕ ═══════
+local State = {
+    Farming = false,
+    RoundStart = 0,
+    Collected = 0,
+    LastFolder = nil,
+    PStand = false,
+    FPSOn = false,
+    HRP = nil,
+}
 
-if Config.UseGUI then
-    local success, err = pcall(function()
-        local hui = gethui()
-        local old = hui:FindFirstChild("MM2v11")
-        if old then old:Destroy() end
+_G.MM2Stop = false
 
-        local gui = Instance.new("ScreenGui")
-        gui.Name = "MM2v11"
-        gui.ResetOnSpawn = false
-        gui.Parent = hui
-
-        local main = Instance.new("Frame")
-        main.Size = UDim2.new(0, 300, 0, 400)
-        main.Position = UDim2.new(0, 20, 0, 20)
-        main.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-        main.BorderColor3 = Color3.fromRGB(0, 255, 128)
-        main.BorderSizePixel = 2
-        main.Active = true
-        main.Draggable = true
-        main.Parent = gui
-
-        -- Заголовок
-        local title = Instance.new("TextLabel")
-        title.Size = UDim2.new(1, 0, 0, 30)
-        title.BackgroundColor3 = Color3.fromRGB(0, 255, 128)
-        title.Text = "  MM2 FARM v11"
-        title.TextColor3 = Color3.fromRGB(0, 0, 0)
-        title.Font = Enum.Font.SourceSansBold
-        title.TextSize = 18
-        title.TextXAlignment = Enum.TextXAlignment.Left
-        title.Parent = main
-
-        -- Утилита кнопок
-        local function makeBtn(txt, y, r, g, b)
-            local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(0, 260, 0, 34)
-            btn.Position = UDim2.new(0, 20, 0, y)
-            btn.BackgroundColor3 = Color3.fromRGB(r, g, b)
-            btn.Text = txt
-            btn.TextColor3 = Color3.new(1, 1, 1)
-            btn.Font = Enum.Font.SourceSansBold
-            btn.TextSize = 14
-            btn.Parent = main
-            return btn
-        end
-
-        local function makeLbl(txt, y, col)
-            local l = Instance.new("TextLabel")
-            l.Size = UDim2.new(0, 260, 0, 20)
-            l.Position = UDim2.new(0, 20, 0, y)
-            l.BackgroundTransparency = 1
-            l.Text = txt
-            l.TextColor3 = col or Color3.fromRGB(255, 255, 255)
-            l.Font = Enum.Font.Code
-            l.TextSize = 13
-            l.TextXAlignment = Enum.TextXAlignment.Left
-            l.Parent = main
-            return l
-        end
-
-        -- Кнопки
-        GUI.btnFarm   = makeBtn("⏵ Auto Farm: OFF", 40, 120, 40, 40)
-        GUI.btnCPU    = makeBtn("🖥 CPU Nuke: OFF", 80, 40, 60, 100)
-        GUI.btnFPS    = makeBtn("📉 FPS Cap: OFF", 120, 40, 100, 40)
-        GUI.btnNoclip = makeBtn("👻 Noclip: OFF", 160, 100, 80, 30)
-        GUI.btnPstand = makeBtn("🧍 PStand: OFF", 200, 80, 60, 80)
-
-        -- Статусы
-        GUI.lblStatus = makeLbl("Status: READY", 240, Color3.fromRGB(0, 255, 128))
-        GUI.lblRound  = makeLbl("Round: 0/40", 262, Color3.fromRGB(255, 255, 0))
-        GUI.lblTotal  = makeLbl("Total: --", 284, Color3.fromRGB(0, 200, 255))
-        GUI.lblPing   = makeLbl("Ping: --", 306, Color3.fromRGB(200, 200, 200))
-        GUI.lblDebug  = makeLbl("Debug: GUI loaded", 328, Color3.fromRGB(150, 150, 150))
-        GUI.lblJob    = makeLbl("ID: " .. game.JobId:sub(1, 8), 350, Color3.fromRGB(100, 100, 100))
-
-        log("GUI создан")
-    end)
-
-    if not success then
-        log("GUI не создан:", err)
-        Config.UseGUI = false
-    end
-end
-
--- ═══════ ОПТИМИЗАЦИЯ ПЕРСОНАЖА ═══════
-local function optimizeCharacter(char)
+-- ═══════ ПЕРСОНАЖ ═══════
+local function optimize(char)
     if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
         hum.PlatformStand = State.PStand
         hum.AutoRotate = not State.PStand
     end
-    for _, obj in pairs(char:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            obj.CastShadow = false
-            if State.Noclip then
-                obj.CanCollide = false
-                obj.Massless = true
-            else
-                obj.CanCollide = true
-                obj.Massless = false
-            end
+    for _, p in pairs(char:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.CastShadow = false
         end
     end
     State.HRP = char:FindFirstChild("HumanoidRootPart")
 end
 
-player.CharacterAdded:Connect(function(char)
+player.CharacterAdded:Connect(function(c)
     task.wait(0.5)
-    optimizeCharacter(char)
+    optimize(c)
 end)
-if player.Character then optimizeCharacter(player.Character) end
+if player.Character then optimize(player.Character) end
+
+-- ═══════ FPS ═══════
+pcall(function() setfpscap(Config.FPSCap) end)
 
 -- ═══════ УТИЛИТЫ ═══════
-local function getCoinFolder()
-    for _, name in ipairs(Config.CoinFolderNames) do
-        local f = Workspace:FindFirstChild(name)
+local function getFolder()
+    for _, n in ipairs(Config.CoinFolderNames) do
+        local f = Workspace:FindFirstChild(n)
         if f then return f end
     end
     local map = Workspace:FindFirstChild("Map")
     if map then
-        for _, name in ipairs(Config.CoinFolderNames) do
-            local f = map:FindFirstChild(name)
+        for _, n in ipairs(Config.CoinFolderNames) do
+            local f = map:FindFirstChild(n)
             if f then return f end
         end
     end
     return nil
 end
 
-local function getLeaderCoins()
+local function getCoins()
     local ls = player:FindFirstChild("leaderstats")
     if not ls then return nil end
     local c = ls:FindFirstChild("Coins") or ls:FindFirstChild("coins")
@@ -199,194 +158,144 @@ local function getLeaderCoins()
     return nil
 end
 
-local function updateGlobals(status)
-    _G.MM2Status     = status or _G.MM2Status
-    _G.MM2Round      = State.RoundCollected
-    _G.MM2Total      = getLeaderCoins() or _G.MM2Total
-    _G.MM2StartCoins = State.RoundStartCoins
-
-    if Config.UseGUI then
+local function updateGUI(status)
+    if not GUI.lblStatus then return end
+    pcall(function()
+        GUI.lblStatus.Text = "Status: " .. (status or "IDLE")
+        GUI.lblRound.Text = "Round: " .. State.Collected .. "/40"
+        local t = getCoins()
+        GUI.lblTotal.Text = "Total: " .. (t or "--")
+        local p = 0
         pcall(function()
-            GUI.lblStatus.Text = "Status: " .. _G.MM2Status
-            GUI.lblRound.Text  = "Round: " .. State.RoundCollected .. "/" .. Config.RoundLimit
-            GUI.lblTotal.Text  = "Total: " .. (_G.MM2Total ~= 0 and _G.MM2Total or "--")
-
-            local p = 0
-            pcall(function()
-                p = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-            end)
-            GUI.lblPing.Text = "Ping: " .. p .. "ms"
+            p = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
         end)
-    end
+        GUI.lblPing.Text = "Ping: " .. p .. "ms"
+    end)
 end
 
-local function randomDelay(min, max)
-    task.wait(math.random(math.floor(min * 10), math.floor(max * 10)) / 10)
-end
-
--- ═══════ ОБРАБОТЧИКИ КНОПОК ═══════
-if Config.UseGUI then
+-- ═══════ КНОПКИ (БЕЗОПАСНЫЕ) ═══════
+if GUI.btnFarm then
     GUI.btnFarm.MouseButton1Click:Connect(function()
         State.Farming = not State.Farming
-        GUI.btnFarm.Text = State.Farming and "⏹ Auto Farm: ON" or "⏵ Auto Farm: OFF"
+        GUI.btnFarm.Text = State.Farming and "⏹ Farm: ON" or "⏵ Farm: OFF"
         GUI.btnFarm.BackgroundColor3 = State.Farming and Color3.fromRGB(40, 150, 40) or Color3.fromRGB(120, 40, 40)
-        log("Farm:", State.Farming and "ON" or "OFF")
     end)
+end
 
-    GUI.btnCPU.MouseButton1Click:Connect(function()
-        State.CPUOptimized = not State.CPUOptimized
-        GUI.btnCPU.Text = State.CPUOptimized and "🖥 CPU Nuke: ON" or "🖥 CPU Nuke: OFF"
-        GUI.btnCPU.BackgroundColor3 = State.CPUOptimized and Color3.fromRGB(120, 40, 40) or Color3.fromRGB(40, 60, 100)
-
-        if State.CPUOptimized then
-            pcall(function() RunService:Set3dRenderingEnabled(false) end)
-            for _, obj in pairs(Workspace:GetDescendants()) do
-                if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Sound") or obj:IsA("Explosion") then
-                    pcall(function() obj:Destroy() end)
-                elseif obj:IsA("BasePart") then
-                    obj.CastShadow = false
-                end
-            end
-            Lighting.GlobalShadows = false
-            log("CPU Nuke ON")
-        else
-            pcall(function() RunService:Set3dRenderingEnabled(true) end)
-            log("CPU Nuke OFF")
-        end
-    end)
-
+if GUI.btnFPS then
     GUI.btnFPS.MouseButton1Click:Connect(function()
-        State.FPSOptimized = not State.FPSOptimized
-        GUI.btnFPS.Text = State.FPSOptimized and "📉 FPS Cap: 15" or "📉 FPS Cap: OFF"
-        GUI.btnFPS.BackgroundColor3 = State.FPSOptimized and Color3.fromRGB(40, 150, 40) or Color3.fromRGB(40, 100, 40)
-        pcall(function() setfpscap(State.FPSOptimized and 15 or 60) end)
-        log("FPS:", State.FPSOptimized and "15" or "60")
+        State.FPSOn = not State.FPSOn
+        GUI.btnFPS.Text = State.FPSOn and "📉 FPS: 15" or "📉 FPS: OFF"
+        GUI.btnFPS.BackgroundColor3 = State.FPSOn and Color3.fromRGB(40, 150, 40) or Color3.fromRGB(40, 100, 40)
+        pcall(function() setfpscap(State.FPSOn and 15 or 60) end)
     end)
+end
 
-    GUI.btnNoclip.MouseButton1Click:Connect(function()
-        State.Noclip = not State.Noclip
-        GUI.btnNoclip.Text = State.Noclip and "👻 Noclip: ON" or "👻 Noclip: OFF"
-        GUI.btnNoclip.BackgroundColor3 = State.Noclip and Color3.fromRGB(150, 120, 40) or Color3.fromRGB(100, 80, 30)
-        if player.Character then optimizeCharacter(player.Character) end
-    end)
-
+if GUI.btnPstand then
     GUI.btnPstand.MouseButton1Click:Connect(function()
         State.PStand = not State.PStand
         GUI.btnPstand.Text = State.PStand and "🧍 PStand: ON" or "🧍 PStand: OFF"
         GUI.btnPstand.BackgroundColor3 = State.PStand and Color3.fromRGB(120, 90, 120) or Color3.fromRGB(80, 60, 80)
-        if player.Character then optimizeCharacter(player.Character) end
+        if player.Character then optimize(player.Character) end
     end)
 end
 
--- ═══════ ФАРМ ЦИКЛ ═══════
-task.wait(Config.AutoStartDelay)
+-- ═══════ ФАРМ ═══════
+task.wait(Config.AutoStartDelay or 3)
 
 if Config.AutoFarm then
     State.Farming = true
-    if Config.UseGUI then
-        GUI.btnFarm.Text = "⏹ Auto Farm: ON"
+    if GUI.btnFarm then
+        GUI.btnFarm.Text = "⏹ Farm: ON"
         GUI.btnFarm.BackgroundColor3 = Color3.fromRGB(40, 150, 40)
     end
 end
 
-log("=== ФАРМ ГОТОВ ===")
-log("Команды: _G.MM2Stop = true/false")
+log("=== СТАРТ ===")
 
 while true do
     if _G.MM2Stop then
-        if State.Farming then
-            State.Farming = false
-            updateGlobals("STOPPED")
-            log("Остановлено")
-        end
+        updateGUI("STOPPED")
         task.wait(1)
         continue
     end
 
-    local folder = getCoinFolder()
+    if not State.Farming then
+        updateGUI("IDLE")
+        task.wait(1)
+        continue
+    end
+
+    local folder = getFolder()
 
     -- Новый раунд
     if folder and folder ~= State.LastFolder then
-        State.LastFolder      = folder
-        State.RoundCollected  = 0
-        State.RoundStartCoins = getLeaderCoins() or 0
-        State.IsLobby         = false
-        updateGlobals("FARMING")
-        log("Новый раунд | Старт:", State.RoundStartCoins)
+        State.LastFolder = folder
+        State.Collected = 0
+        State.RoundStart = getCoins() or 0
+        log("Раунд | Старт:", State.RoundStart)
     end
 
     -- Лобби
     if not folder or not folder.Parent then
-        if not State.IsLobby then
-            State.IsLobby = true
-            State.LastFolder = nil
-            updateGlobals("LOBBY")
-            log("Лобби...")
-        end
+        updateGUI("LOBBY")
+        State.LastFolder = nil
         task.wait(2)
         continue
     end
 
     -- Лимит 40
-    local current = getLeaderCoins()
-    if current and State.RoundStartCoins and (current - State.RoundStartCoins) >= Config.RoundLimit then
-        if _G.MM2Status ~= "LIMIT_40" then
-            updateGlobals("LIMIT_40")
-            log("Лимит", Config.RoundLimit, "| Всего:", current)
-        end
+    local cur = getCoins()
+    if cur and State.RoundStart and (cur - State.RoundStart) >= 40 then
+        updateGUI("LIMIT 40")
         task.wait(3)
         continue
     end
 
-    if State.Farming then
-        updateGlobals("FARMING")
+    updateGUI("FARMING")
 
-        if not State.HRP or not State.HRP.Parent then
-            local char = player.Character
-            if char then State.HRP = char:FindFirstChild("HumanoidRootPart") end
-            if not State.HRP then task.wait(1) continue end
+    if not State.HRP or not State.HRP.Parent then
+        local c = player.Character
+        if c then State.HRP = c:FindFirstChild("HumanoidRootPart") end
+        if not State.HRP then task.wait(1) continue end
+    end
+
+    -- Сбор
+    local coins = {}
+    for _, c in pairs(folder:GetChildren()) do
+        if c:IsA("BasePart") and c.Parent then
+            table.insert(coins, c)
         end
+    end
 
-        local coins = {}
-        for _, obj in pairs(folder:GetChildren()) do
-            if obj:IsA("BasePart") and obj.Parent then
-                table.insert(coins, obj)
-            end
-        end
+    if #coins == 0 then
+        task.wait(0.5)
+        continue
+    end
 
-        if #coins == 0 then
-            task.wait(0.5)
-            continue
-        end
+    table.sort(coins, function(a, b)
+        return (a.Position - State.HRP.Position).Magnitude < (b.Position - State.HRP.Position).Magnitude
+    end)
 
-        table.sort(coins, function(a, b)
-            return (a.Position - State.HRP.Position).Magnitude < (b.Position - State.HRP.Position).Magnitude
+    for _, coin in ipairs(coins) do
+        if _G.MM2Stop or not State.Farming then break end
+        if not coin.Parent then continue end
+
+        local now = getCoins()
+        if now and State.RoundStart and (now - State.RoundStart) >= 40 then break end
+
+        if not State.HRP or not State.HRP.Parent then break end
+
+        pcall(function()
+            State.HRP.CFrame = coin.CFrame + Vector3.new(0, 2, 0)
         end)
 
-        for _, coin in ipairs(coins) do
-            if _G.MM2Stop then break end
-            if not State.Farming then break end
-            if not coin.Parent then continue end
+        task.wait(math.random(4, 9) / 10)
 
-            local now = getLeaderCoins()
-            if now and State.RoundStartCoins and (now - State.RoundStartCoins) >= Config.RoundLimit then break end
-
-            if not State.HRP or not State.HRP.Parent then break end
-
-            pcall(function()
-                State.HRP.CFrame = coin.CFrame + Vector3.new(0, 2, 0)
-            end)
-
-            randomDelay(0.4, 0.8)
-
-            if not coin.Parent then
-                State.RoundCollected = State.RoundCollected + 1
-            end
-
-            randomDelay(0.5, 1.0)
+        if not coin.Parent then
+            State.Collected = State.Collected + 1
         end
-    else
-        updateGlobals("IDLE")
-        task.wait(1)
+
+        task.wait(math.random(5, 12) / 10)
     end
 end
