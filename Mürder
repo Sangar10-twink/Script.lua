@@ -1,0 +1,294 @@
+--[[
+    ═══════════════════════════════════════════════════════════════
+    MM2 SUMMER FARM v10 | HEADLESS | Xeno / UNC
+    Оптимизирован для Xeon E5-2680 v3 | 30 окон на публике
+    Управление: _G.MM2Stop, _G.MM2Status, _G.MM2Round, _G.MM2Total
+    ═══════════════════════════════════════════════════════════════
+]]
+
+-- ═══════ ЗАЩИТА ОТ ПОВТОРНОГО ИНЖЕКТА ═══════
+if _G.MM2v10Loaded then
+    warn("[MM2v10] Уже загружен в этом окне")
+    return
+end
+_G.MM2v10Loaded = true
+
+-- ═══════ КОНФИГ (можно переопределить через _G.MM2Config до загрузки) ═══════
+local Config = _G.MM2Config or {
+    FPSCap           = 15,                -- Ограничение FPS (0 = не трогать)
+    AutoStartDelay   = 5,                 -- Секунд до старта фарма
+    TeleportOffset   = Vector3.new(0, 2, 0), -- Насколько выше монетки телепорт
+    MinDelay         = 0.4,               -- Мин. задержка между монетками (античит)
+    MaxDelay         = 0.9,               -- Макс. задержка
+    RoundLimit       = 40,                -- Лимит монет за раунд в MM2
+    DebugPrints      = true,              -- Логи в консоль
+    CoinFolderNames  = {                  -- Возможные названия папок с монетками
+        "CoinContainer",
+        "Coins",
+        "CoinSpawner",
+        "Coins_Server",
+        "Spawns",
+        "SummerCoins",
+        "EventCoins",
+        "Coin_Server",
+    },
+}
+
+-- ═══════ СЕРВИСЫ ═══════
+local Players      = game:GetService("Players")
+local Workspace    = game:GetService("Workspace")
+local Stats        = game:GetService("Stats")
+local RunService   = game:GetService("RunService")
+
+local player       = Players.LocalPlayer
+
+-- ═══════ СОСТОЯНИЕ ═══════
+local State = {
+    Farming         = false,
+    RoundStartCoins = 0,
+    RoundCollected  = 0,
+    LastFolder      = nil,
+    IsLobby         = true,
+    Character       = nil,
+    Humanoid        = nil,
+    HRP             = nil,
+}
+
+-- ═══════ ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ (для контроля извне) ═══════
+_G.MM2Stop       = false        -- true = пауза
+_G.MM2Status     = "INIT"       -- Текущий статус
+_G.MM2Round      = 0            -- Собрано за текущий раунд
+_G.MM2Total      = 0            -- Всего монет (из leaderstats)
+_G.MM2StartCoins = 0            -- Монет на старте раунда
+
+-- ═══════ УТИЛИТЫ ═══════
+
+local function log(...)
+    if Config.DebugPrints then
+        print("[MM2v10]", ...)
+    end
+end
+
+-- Применение оптимизаций к персонажу (CPU-friendly)
+local function optimizeCharacter(char)
+    if not char then return end
+    State.Character = char
+    
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        State.Humanoid = hum
+        hum.PlatformStand = true
+        hum.AutoRotate = false
+    end
+    
+    for _, obj in pairs(char:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            obj.CanCollide = false
+            obj.CastShadow = false
+            obj.Massless = true
+        end
+    end
+    
+    local hrp = char:WaitForChild("HumanoidRootPart", 3)
+    State.HRP = hrp
+end
+
+-- Поиск папки с монетками (универсально)
+local function getCoinFolder()
+    for _, name in ipairs(Config.CoinFolderNames) do
+        local f = Workspace:FindFirstChild(name)
+        if f then return f end
+    end
+    
+    local map = Workspace:FindFirstChild("Map")
+    if map then
+        for _, name in ipairs(Config.CoinFolderNames) do
+            local f = map:FindFirstChild(name)
+            if f then return f end
+        end
+    end
+    
+    return nil
+end
+
+-- Чтение реального баланса монет
+local function getLeaderCoins()
+    local ls = player:FindFirstChild("leaderstats")
+    if not ls then return nil end
+    
+    local coinVal = ls:FindFirstChild("Coins") or ls:FindFirstChild("coins")
+    if coinVal and coinVal:IsA("IntValue") then
+        return coinVal.Value
+    end
+    return nil
+end
+
+-- Обновление глобальных переменных
+local function updateGlobals(status)
+    _G.MM2Status     = status or _G.MM2Status
+    _G.MM2Round      = State.RoundCollected
+    _G.MM2Total      = getLeaderCoins() or _G.MM2Total
+    _G.MM2StartCoins = State.RoundStartCoins
+end
+
+-- Рандомная задержка (античит-профилактика)
+local function randomDelay(min, max)
+    task.wait(math.random(math.floor(min * 10), math.floor(max * 10)) / 10)
+end
+
+-- ═══════ ОБРАБОТЧИКИ ═══════
+
+player.CharacterAdded:Connect(function(char)
+    task.wait(0.5)
+    optimizeCharacter(char)
+end)
+
+if player.Character then
+    optimizeCharacter(player.Character)
+end
+
+-- ═══════ FPS CAP ═══════
+if Config.FPSCap > 0 then
+    pcall(function()
+        setfpscap(Config.FPSCap)
+        log("FPS ограничен:", Config.FPSCap)
+    end)
+end
+
+-- ═══════ ГЛАВНЫЙ ЦИКЛ ═══════
+
+log("Инициализация завершена")
+log("Задержка перед стартом:", Config.AutoStartDelay, "сек")
+task.wait(Config.AutoStartDelay)
+
+log("=== ФАРМ АКТИВИРОВАН ===")
+log("Команды:")
+log("  _G.MM2Stop = true    -- остановить")
+log("  _G.MM2Stop = false   -- продолжить")
+log("  print(_G.MM2Status, _G.MM2Round, _G.MM2Total)")
+
+while true do
+    -- Проверка паузы
+    if _G.MM2Stop then
+        if State.Farming then
+            State.Farming = false
+            updateGlobals("STOPPED")
+            log("Остановлено (_G.MM2Stop = true)")
+        end
+        task.wait(1)
+        continue
+    end
+    
+    State.Farming = true
+    
+    -- Поиск папки с монетками
+    local folder = getCoinFolder()
+    
+    -- Определение нового раунда
+    if folder and folder ~= State.LastFolder then
+        State.LastFolder      = folder
+        State.RoundCollected  = 0
+        State.RoundStartCoins = getLeaderCoins() or 0
+        State.IsLobby         = false
+        updateGlobals("FARMING")
+        log("Новый раунд | Стартовые монеты:", State.RoundStartCoins)
+    end
+    
+    -- Лобби (нет папки или она удалена)
+    if not folder or not folder.Parent then
+        if not State.IsLobby then
+            State.IsLobby = true
+            State.LastFolder = nil
+            updateGlobals("LOBBY")
+            log("Лобби, ожидание раунда...")
+        end
+        task.wait(2)
+        continue
+    end
+    
+    -- Лимит 40 монет за раунд
+    local currentCoins = getLeaderCoins()
+    if currentCoins and State.RoundStartCoins and (currentCoins - State.RoundStartCoins) >= Config.RoundLimit then
+        if _G.MM2Status ~= "LIMIT_40" then
+            updateGlobals("LIMIT_40")
+            log("Лимит", Config.RoundLimit, "монет достигнут | Всего:", currentCoins)
+        end
+        task.wait(3)
+        continue
+    end
+    
+    -- Обновление статуса
+    updateGlobals("FARMING")
+    
+    -- Проверка персонажа
+    if not State.HRP or not State.HRP.Parent then
+        local char = player.Character
+        if char then
+            State.HRP = char:FindFirstChild("HumanoidRootPart")
+        end
+        if not State.HRP then
+            task.wait(1)
+            continue
+        end
+    end
+    
+    -- Сбор списка монеток
+    local coins = {}
+    for _, obj in pairs(folder:GetChildren()) do
+        if obj:IsA("BasePart") and obj.Parent then
+            table.insert(coins, obj)
+        end
+    end
+    
+    if #coins == 0 then
+        task.wait(0.5)
+        continue
+    end
+    
+    -- Сортировка по близости (меньше хаотичных прыжков)
+    table.sort(coins, function(a, b)
+        return (a.Position - State.HRP.Position).Magnitude < (b.Position - State.HRP.Position).Magnitude
+    end)
+    
+    -- Сбор
+    for _, coin in ipairs(coins) do
+        if _G.MM2Stop then break end
+        if not coin.Parent then continue end
+        
+        -- Перепроверка лимита перед каждой монетой
+        local now = getLeaderCoins()
+        if now and State.RoundStartCoins and (now - State.RoundStartCoins) >= Config.RoundLimit then
+            break
+        end
+        
+        -- Обновление HRP (на случай респавна)
+        if not State.HRP or not State.HRP.Parent then
+            local char = player.Character
+            if char then
+                State.HRP = char:FindFirstChild("HumanoidRootPart")
+            end
+            if not State.HRP then break end
+        end
+        
+        -- Телепорт к монетке
+        local success = pcall(function()
+            State.HRP.CFrame = coin.CFrame + Config.TeleportOffset
+        end)
+        
+        if not success then
+            log("Ошибка телепорта")
+            continue
+        end
+        
+        -- Ждём сбора (Touched + античит-задержка)
+        randomDelay(Config.MinDelay, Config.MaxDelay)
+        
+        -- Проверяем, исчезла ли монетка
+        if not coin.Parent then
+            State.RoundCollected = State.RoundCollected + 1
+        end
+        
+        -- Пауза между монетками
+        randomDelay(Config.MinDelay + 0.2, Config.MaxDelay + 0.3)
+    end
+end
