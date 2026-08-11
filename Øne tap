@@ -1,0 +1,153 @@
+-- One Tap: Auto Case Opener + Разведка
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local player = Players.LocalPlayer
+
+print("=" .. string.rep("=", 50))
+print("  ONE TAP: АВТО-КЕЙСЫ + РАЗВЕДКА")
+print("=" .. string.rep("=", 50))
+
+-- === ЧАСТЬ 1: НАХОДИМ ВАЛЮТУ ===
+print("\n[1] ПОИСК ВАЛЮТЫ ($):")
+local moneyValue = nil
+
+-- Проверяем leaderstats
+local leaderstats = player:FindFirstChild("leaderstats")
+if leaderstats then
+    for _, stat in ipairs(leaderstats:GetChildren()) do
+        if stat:IsA("IntValue") or stat:IsA("NumberValue") then
+            print("    Найдено:", stat.Name, "=", stat.Value)
+            if stat.Name:lower():find("money") or stat.Name:lower():find("cash") 
+               or stat.Name:lower():find("coin") or stat.Name:lower():find("credit")
+               or stat.Name:lower():find("buck") or stat.Name:lower():find("dollar") then
+                moneyValue = stat
+                print("    >> Это похоже на валюту:", stat.Name)
+            end
+        end
+    end
+end
+
+-- Проверяем PlayerGui на текст с $
+local gui = player:WaitForChild("PlayerGui")
+for _, obj in ipairs(gui:GetDescendants()) do
+    if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+        local txt = obj.Text or ""
+        if txt:find("%$") and txt:match("%d+") then
+            print("    GUI валюта:", obj.Name, "=", txt, "| Путь:", obj:GetFullName())
+        end
+    end
+end
+
+if moneyValue then
+    print("    Текущая валюта:", moneyValue.Name, "=", moneyValue.Value, "$")
+else
+    print("    ! Валюта не найдена в leaderstats, ищем дальше...")
+end
+
+-- === ЧАСТЬ 2: НАХОДИМ REMOTE ДЛЯ КЕЙСОВ ===
+print("\n[2] ПОИСК REMOTE ДЛЯ ОТКРЫТИЯ КЕЙСОВ:")
+local caseRemotes = {}
+
+for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+    if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+        local name = obj.Name:lower()
+        -- Ищем всё, что связано с кейсами, открытием, покупкой
+        if name:find("case") or name:find("box") or name:find("crate") 
+           or name:find("open") or name:find("buy") or name:find("purchase")
+           or name:find("roll") or name:find("spin") or name:find("reward")
+           or name:find("loot") or name:find("item") or name:find("weapon") then
+            table.insert(caseRemotes, obj)
+            print("    >>", obj.ClassName .. ":", obj.Name)
+        end
+    end
+end
+
+-- === ЧАСТЬ 3: ИЩЕМ КНОПКИ КЕЙСОВ В GUI ===
+print("\n[3] КНОПКИ КЕЙСОВ В GUI:")
+local caseButtons = {}
+for _, obj in ipairs(gui:GetDescendants()) do
+    if obj:IsA("TextButton") or obj:IsA("ImageButton") then
+        local txt = (obj.Text or ""):lower()
+        local name = obj.Name:lower()
+        if txt:find("open") or txt:find("buy") or txt:find("purchase") 
+           or name:find("case") or name:find("box") or name:find("crate")
+           or name:find("open") or name:find("buy") then
+            table.insert(caseButtons, obj)
+            print("    >>", obj.Name, "(", obj.ClassName, ")")
+            print("       Текст:", obj.Text)
+            print("       Путь:", obj:GetFullName())
+        end
+    end
+end
+
+-- === ЧАСТЬ 4: ФУНКЦИЯ АВТО-ОТКРЫТИЯ ===
+print("\n[4] ФУНКЦИЯ АВТО-ОТКРЫТИЯ:")
+print("    Используй в консоли:")
+print("    openCase('название_кейса') — если Remote найден")
+print("    или autoOpen(количество, задержка) — авто-открытие")
+
+-- Пытаемся определить самый вероятный Remote
+_G.openCase = function(caseName)
+    for _, remote in ipairs(caseRemotes) do
+        print("    Пробуем:", remote.Name)
+        local success, result = pcall(function()
+            -- Варианты вызова:
+            remote:FireServer(caseName) -- с названием кейса
+        end)
+        if success then
+            print("    >> Успешно отправлено:", remote.Name)
+        else
+            print("    >> Ошибка:", result)
+        end
+    end
+end
+
+-- Массовое открытие
+_G.autoOpen = function(amount, delay)
+    delay = delay or 0.1
+    amount = amount or 10
+    print("    Авто-открытие", amount, "кейсов с задержкой", delay)
+    
+    for i = 1, amount do
+        for _, remote in ipairs(caseRemotes) do
+            pcall(function()
+                remote:FireServer()
+            end)
+        end
+        task.wait(delay)
+        if i % 10 == 0 then
+            print("    Открыто:", i, "/", amount)
+        end
+    end
+    print("    Готово!")
+end
+
+-- === ЧАСТЬ 5: АВТО-КЛИКЕР ПО КНОПКАМ (если Remote не работает) ===
+_G.autoClickCases = function(amount, delay)
+    delay = delay or 0.5
+    amount = amount or 10
+    print("    Авто-клик по кнопкам кейсов:", amount, "раз")
+    
+    for i = 1, amount do
+        for _, btn in ipairs(caseButtons) do
+            pcall(function()
+                -- Имитируем клики
+                btn.MouseButton1Click:Fire()
+                if btn:FindFirstChild("Activated") then
+                    btn.Activated:Fire()
+                end
+            end)
+        end
+        task.wait(delay)
+        if i % 10 == 0 then
+            print("    Кликов:", i, "/", amount)
+        end
+    end
+end
+
+print("\n" .. string.rep("=", 52))
+print("  ГОТОВО! Попробуй команды в консоли (F9):")
+print("  openCase('название')")
+print("  autoOpen(50, 0.1)  -- 50 кейсов, задержка 0.1 сек")
+print("  autoClickCases(20) -- 20 кликов по кнопкам")
+print(string.rep("=", 52))
