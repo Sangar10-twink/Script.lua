@@ -1,301 +1,144 @@
 --[[
-    MM2 FARM v11.1 | SAFE GUI | Без крашеров
-    Убрано: Set3dRenderingEnabled, Draggable, Active, Workspace:Destroy
+    MM2 Ultra-Optimizer | Для 30+ инстансов Roblox
+    Цель: Минимальный CPU/GPU/RAM usage
 ]]
 
-if _G.MM2v11Loaded then return end
-_G.MM2v11Loaded = true
+if _G.MM2UltraOptLoaded then return end
+_G.MM2UltraOptLoaded = true
 
-local Config = _G.MM2Config or {
-    FPSCap      = 15,
-    AutoFarm    = true,
-    DebugPrints = true,
-    CoinFolderNames = {
-        "CoinContainer", "Coins", "CoinSpawner", "Coins_Server",
-        "Spawns", "SummerCoins", "EventCoins", "Coin_Server",
-    },
+-- ═══════ КОНФИГ ═══════
+local Config = {
+    FPSCap          = 5,     -- 5 FPS максимум (можно 3 для совсем слабых ПК)
+    RenderDistance  = 10,    -- Дистанция прорисовки (студия)
+    RemoveAllEffects = true, -- Удалить все эффекты с карты
+    DisableAudio    = true,  -- Отключить звук полностью
+    FreezeCharacter = true,  -- Полная заморозка персонажа
+    LowQualityMode  = true,  -- Минимальное качество графики
 }
 
-local Players   = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local Stats     = game:GetService("Stats")
-local player    = Players.LocalPlayer
+-- ═══════ СЕРВИСЫ ═══════
+local Players       = game:GetService("Players")
+local Workspace     = game:GetService("Workspace")
+local Lighting      = game:GetService("Lighting")
+local RunService    = game:GetService("RunService")
+local SoundService  = game:GetService("SoundService")
+local StarterGui    = game:GetService("StarterGui")
+local player        = Players.LocalPlayer
 
--- ═══════ GUI (БЕЗОПАСНЫЙ) ═══════
-local GUI = {}
-
-pcall(function()
-    local hui = gethui()
-    local old = hui:FindFirstChild("MM2v11")
-    if old then old:Destroy() end
-
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "MM2v11"
-    gui.ResetOnSpawn = false
-    gui.Parent = hui
-
-    local main = Instance.new("Frame")
-    main.Size = UDim2.new(0, 280, 0, 300)
-    main.Position = UDim2.new(0, 20, 0, 20)
-    main.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    main.BorderColor3 = Color3.fromRGB(0, 255, 128)
-    main.BorderSizePixel = 2
-    -- НЕТ Draggable, НЕТ Active — крашат при инжекте
-    main.Parent = gui
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 28)
-    title.BackgroundColor3 = Color3.fromRGB(0, 255, 128)
-    title.Text = "  MM2 v11.1 SAFE"
-    title.TextColor3 = Color3.fromRGB(0, 0, 0)
-    title.Font = Enum.Font.SourceSansBold
-    title.TextSize = 16
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = main
-
-    local function btn(txt, y, r, g, b)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.new(0, 240, 0, 30)
-        b.Position = UDim2.new(0, 20, 0, y)
-        b.BackgroundColor3 = Color3.fromRGB(r, g, b)
-        b.Text = txt
-        b.TextColor3 = Color3.new(1, 1, 1)
-        b.Font = Enum.Font.SourceSansBold
-        b.TextSize = 14
-        b.Parent = main
-        return b
-    end
-
-    local function lbl(txt, y, col)
-        local l = Instance.new("TextLabel")
-        l.Size = UDim2.new(0, 240, 0, 18)
-        l.Position = UDim2.new(0, 20, 0, y)
-        l.BackgroundTransparency = 1
-        l.Text = txt
-        l.TextColor3 = col or Color3.fromRGB(255, 255, 255)
-        l.Font = Enum.Font.Code
-        l.TextSize = 13
-        l.TextXAlignment = Enum.TextXAlignment.Left
-        l.Parent = main
-        return l
-    end
-
-    GUI.btnFarm   = btn("⏵ Farm: OFF", 35, 120, 40, 40)
-    GUI.btnFPS    = btn("📉 FPS: OFF", 70, 40, 100, 40)
-    GUI.btnPstand = btn("🧍 PStand: OFF", 105, 80, 60, 80)
-
-    GUI.lblStatus = lbl("Status: INIT", 145, Color3.fromRGB(0, 255, 128))
-    GUI.lblRound  = lbl("Round: 0/40", 165, Color3.fromRGB(255, 255, 0))
-    GUI.lblTotal  = lbl("Total: --", 185, Color3.fromRGB(0, 200, 255))
-    GUI.lblPing   = lbl("Ping: --", 205, Color3.fromRGB(200, 200, 200))
-    GUI.lblWarn   = lbl("NO CPU NUKE (crash fix)", 225, Color3.fromRGB(255, 100, 100))
-end)
-
--- ═══════ ЛОГ ═══════
-local function log(...)
-    if Config.DebugPrints then print("[MM2v11.1]", ...) end
+-- ═══════ 1. FPS CAP (САМОЕ ВАЖНОЕ) ═══════
+if typeof(setfpscap) == "function" then
+    pcall(function()
+        setfpscap(Config.FPSCap)
+        print("[UltraOpt] FPS capped to", Config.FPSCap)
+    end)
 end
 
--- ═══════ СОСТОЯНИЕ ═══════
-local State = {
-    Farming = false,
-    RoundStart = 0,
-    Collected = 0,
-    LastFolder = nil,
-    PStand = false,
-    FPSOn = false,
-    HRP = nil,
-}
+-- ═══════ 2. ОТКЛЮЧИТЬ ВСЕ СОБЫТИЯ РЕНДЕРИНГА ═══════
+-- Это убивает визуал, но спасает CPU
+pcall(function()
+    RunService:Set3dRenderingEnabled(false)  -- Полностью отключает 3D рендеринг!
+end)
 
-_G.MM2Stop = false
+-- ═══════ 3. ОТКЛЮЧИТЬ ЗВУК ═══════
+if Config.DisableAudio then
+    pcall(function()
+        SoundService.RespectFilteringEnabled = true
+        for _, s in pairs(SoundService:GetDescendants()) do
+            if s:IsA("Sound") then s:Destroy() end
+        end
+        SoundService.Volume = 0
+    end)
+end
 
--- ═══════ ПЕРСОНАЖ ═══════
-local function optimize(char)
+-- ═══════ 4. МИНИМАЛЬНОЕ ОСВЕЩЕНИЕ ═══════
+pcall(function()
+    Lighting.GlobalShadows = false
+    Lighting.Outlines = false
+    Lighting.Brightness = 0
+    Lighting.ClockTime = 12  -- Полдень = меньше вычислений освещения
+    Lighting.FogEnd = 0
+    Lighting.FogStart = 0
+end)
+
+-- ═══════ 5. ЗАМОРОЗИТЬ ПЕРСОНАЖА ПОЛНОСТЬЮ ═══════
+local function freezeCharacter(char)
     if not char then return end
+    
+    -- Убираем тени
+    for _, obj in pairs(char:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            obj.CastShadow = false
+            obj.CanCollide = false  -- Не считать коллизии
+            obj.Material = Enum.Material.SmoothPlastic  -- Простейший материал
+        elseif obj:IsA("Decal") or obj:IsA("Texture") then
+            obj:Destroy()  -- Удалить текстуры
+        elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") then
+            obj:Destroy()  -- Удалить частицы
+        elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
+            obj:Destroy()  -- Удалить GUI на персонаже
+        end
+    end
+    
+    -- PlatformStand + отключить анимации
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
-        hum.PlatformStand = State.PStand
-        hum.AutoRotate = not State.PStand
+        hum.PlatformStand = true
+        hum.AutoRotate = false
+        hum.WalkSpeed = 0
+        hum.JumpPower = 0
     end
-    for _, p in pairs(char:GetDescendants()) do
-        if p:IsA("BasePart") then
-            p.CastShadow = false
-        end
-    end
-    State.HRP = char:FindFirstChild("HumanoidRootPart")
+    
+    -- Удалить аниматор
+    local animator = char:FindFirstChild("Animator", true)
+    if animator then animator:Destroy() end
 end
 
-player.CharacterAdded:Connect(function(c)
+player.CharacterAdded:Connect(function(char)
     task.wait(0.5)
-    optimize(c)
+    freezeCharacter(char)
 end)
-if player.Character then optimize(player.Character) end
 
--- ═══════ FPS ═══════
-pcall(function() setfpscap(Config.FPSCap) end)
-
--- ═══════ УТИЛИТЫ ═══════
-local function getFolder()
-    for _, n in ipairs(Config.CoinFolderNames) do
-        local f = Workspace:FindFirstChild(n)
-        if f then return f end
-    end
-    local map = Workspace:FindFirstChild("Map")
-    if map then
-        for _, n in ipairs(Config.CoinFolderNames) do
-            local f = map:FindFirstChild(n)
-            if f then return f end
-        end
-    end
-    return nil
+if player.Character then
+    freezeCharacter(player.Character)
 end
 
-local function getCoins()
-    local ls = player:FindFirstChild("leaderstats")
-    if not ls then return nil end
-    local c = ls:FindFirstChild("Coins") or ls:FindFirstChild("coins")
-    if c and c:IsA("IntValue") then return c.Value end
-    return nil
-end
-
-local function updateGUI(status)
-    if not GUI.lblStatus then return end
-    pcall(function()
-        GUI.lblStatus.Text = "Status: " .. (status or "IDLE")
-        GUI.lblRound.Text = "Round: " .. State.Collected .. "/40"
-        local t = getCoins()
-        GUI.lblTotal.Text = "Total: " .. (t or "--")
-        local p = 0
-        pcall(function()
-            p = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-        end)
-        GUI.lblPing.Text = "Ping: " .. p .. "ms"
-    end)
-end
-
--- ═══════ КНОПКИ (БЕЗОПАСНЫЕ) ═══════
-if GUI.btnFarm then
-    GUI.btnFarm.MouseButton1Click:Connect(function()
-        State.Farming = not State.Farming
-        GUI.btnFarm.Text = State.Farming and "⏹ Farm: ON" or "⏵ Farm: OFF"
-        GUI.btnFarm.BackgroundColor3 = State.Farming and Color3.fromRGB(40, 150, 40) or Color3.fromRGB(120, 40, 40)
-    end)
-end
-
-if GUI.btnFPS then
-    GUI.btnFPS.MouseButton1Click:Connect(function()
-        State.FPSOn = not State.FPSOn
-        GUI.btnFPS.Text = State.FPSOn and "📉 FPS: 15" or "📉 FPS: OFF"
-        GUI.btnFPS.BackgroundColor3 = State.FPSOn and Color3.fromRGB(40, 150, 40) or Color3.fromRGB(40, 100, 40)
-        pcall(function() setfpscap(State.FPSOn and 15 or 60) end)
-    end)
-end
-
-if GUI.btnPstand then
-    GUI.btnPstand.MouseButton1Click:Connect(function()
-        State.PStand = not State.PStand
-        GUI.btnPstand.Text = State.PStand and "🧍 PStand: ON" or "🧍 PStand: OFF"
-        GUI.btnPstand.BackgroundColor3 = State.PStand and Color3.fromRGB(120, 90, 120) or Color3.fromRGB(80, 60, 80)
-        if player.Character then optimize(player.Character) end
-    end)
-end
-
--- ═══════ ФАРМ ═══════
-task.wait(Config.AutoStartDelay or 3)
-
-if Config.AutoFarm then
-    State.Farming = true
-    if GUI.btnFarm then
-        GUI.btnFarm.Text = "⏹ Farm: ON"
-        GUI.btnFarm.BackgroundColor3 = Color3.fromRGB(40, 150, 40)
-    end
-end
-
-log("=== СТАРТ ===")
-
-while true do
-    if _G.MM2Stop then
-        updateGUI("STOPPED")
-        task.wait(1)
-        continue
-    end
-
-    if not State.Farming then
-        updateGUI("IDLE")
-        task.wait(1)
-        continue
-    end
-
-    local folder = getFolder()
-
-    -- Новый раунд
-    if folder and folder ~= State.LastFolder then
-        State.LastFolder = folder
-        State.Collected = 0
-        State.RoundStart = getCoins() or 0
-        log("Раунд | Старт:", State.RoundStart)
-    end
-
-    -- Лобби
-    if not folder or not folder.Parent then
-        updateGUI("LOBBY")
-        State.LastFolder = nil
-        task.wait(2)
-        continue
-    end
-
-    -- Лимит 40
-    local cur = getCoins()
-    if cur and State.RoundStart and (cur - State.RoundStart) >= 40 then
-        updateGUI("LIMIT 40")
+-- ═══════ 6. ОЧИСТИТЬ КАРТУ ОТ ЭФФЕКТОВ ═══════
+if Config.RemoveAllEffects then
+    task.spawn(function()
         task.wait(3)
-        continue
-    end
-
-    updateGUI("FARMING")
-
-    if not State.HRP or not State.HRP.Parent then
-        local c = player.Character
-        if c then State.HRP = c:FindFirstChild("HumanoidRootPart") end
-        if not State.HRP then task.wait(1) continue end
-    end
-
-    -- Сбор
-    local coins = {}
-    for _, c in pairs(folder:GetChildren()) do
-        if c:IsA("BasePart") and c.Parent then
-            table.insert(coins, c)
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("ParticleEmitter") 
+            or obj:IsA("Trail") 
+            or obj:IsA("Smoke") 
+            or obj:IsA("Fire") 
+            or obj:IsA("Sparkles")
+            or obj:IsA("Beam")
+            or obj:IsA("Explosion") then
+                pcall(function() obj:Destroy() end)
+            elseif obj:IsA("BasePart") then
+                obj.CastShadow = false
+                if obj.Name ~= "HumanoidRootPart" and obj.Name ~= "Head" then
+                    obj.Transparency = 1  -- Сделать невидимым
+                end
+            elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                obj:Destroy()
+            elseif obj:IsA("Sound") then
+                obj:Destroy()
+            end
         end
-    end
-
-    if #coins == 0 then
-        task.wait(0.5)
-        continue
-    end
-
-    table.sort(coins, function(a, b)
-        return (a.Position - State.HRP.Position).Magnitude < (b.Position - State.HRP.Position).Magnitude
+        print("[UltraOpt] Map cleaned")
     end)
-
-    for _, coin in ipairs(coins) do
-        if _G.MM2Stop or not State.Farming then break end
-        if not coin.Parent then continue end
-
-        local now = getCoins()
-        if now and State.RoundStart and (now - State.RoundStart) >= 40 then break end
-
-        if not State.HRP or not State.HRP.Parent then break end
-
-        pcall(function()
-            State.HRP.CFrame = coin.CFrame + Vector3.new(0, 2, 0)
-        end)
-
-        task.wait(math.random(4, 9) / 10)
-
-        if not coin.Parent then
-            State.Collected = State.Collected + 1
-        end
-
-        task.wait(math.random(5, 12) / 10)
-    end
 end
+
+-- ═══════ 7. ОТКЛЮЧИТЬ GUI (чат, меню и т.д.) ═══════
+pcall(function()
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+end)
+
+-- ═══════ 8. УБРАТЬ КАМЕРУ (не рендерить сцену) ═══════
+pcall(function()
+    Workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+    Workspace.CurrentCamera.CFrame = CFrame.new(0, 10000, 0)  -- Улететь в небо
+end)
+
+print("[UltraOpt] Загружено | Инстанс максимально оптимизирован")
