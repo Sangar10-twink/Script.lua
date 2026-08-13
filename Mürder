@@ -1,19 +1,20 @@
 --[[
-    MM2 Ultra-Optimizer | Для 30+ инстансов Roblox
-    Цель: Минимальный CPU/GPU/RAM usage
+    MM2 CPU Optimizer v1 | Модуль для совместного использования с Vertex
+    Цель: Минимизировать CPU usage, оставить 20 FPS
+    НЕ делает фарм — только оптимизацию движка
 ]]
 
-if _G.MM2UltraOptLoaded then return end
-_G.MM2UltraOptLoaded = true
+if _G.MM2CPUOptLoaded then return end
+_G.MM2CPUOptLoaded = true
 
 -- ═══════ КОНФИГ ═══════
 local Config = {
-    FPSCap          = 5,     -- 5 FPS максимум (можно 3 для совсем слабых ПК)
-    RenderDistance  = 10,    -- Дистанция прорисовки (студия)
-    RemoveAllEffects = true, -- Удалить все эффекты с карты
-    DisableAudio    = true,  -- Отключить звук полностью
-    FreezeCharacter = true,  -- Полная заморозка персонажа
-    LowQualityMode  = true,  -- Минимальное качество графики
+    FPSCap          = 20,       -- Твой запрос: 20 FPS
+    FreezeCharacter = true,     -- Убрать физику персонажа
+    StripCharacter  = true,     -- Удалить лишние детали с персонажа
+    DisableAudio    = true,     -- Отключить звук (CPU на декодирование)
+    ReduceMapEffects = true,    -- Удалить частицы/трейлы с карты
+    CacheReferences = true,     -- Кешировать частые поиски
 }
 
 -- ═══════ СЕРВИСЫ ═══════
@@ -22,123 +23,154 @@ local Workspace     = game:GetService("Workspace")
 local Lighting      = game:GetService("Lighting")
 local RunService    = game:GetService("RunService")
 local SoundService  = game:GetService("SoundService")
-local StarterGui    = game:GetService("StarterGui")
 local player        = Players.LocalPlayer
 
--- ═══════ 1. FPS CAP (САМОЕ ВАЖНОЕ) ═══════
+-- ═══════ 1. FPS CAP = 20 ═══════
 if typeof(setfpscap) == "function" then
     pcall(function()
         setfpscap(Config.FPSCap)
-        print("[UltraOpt] FPS capped to", Config.FPSCap)
+        print("[CPU Opt] FPS capped to", Config.FPSCap)
     end)
 end
 
--- ═══════ 2. ОТКЛЮЧИТЬ ВСЕ СОБЫТИЯ РЕНДЕРИНГА ═══════
--- Это убивает визуал, но спасает CPU
+-- ═══════ 2. ОТКЛЮЧИТЬ НЕНУЖНЫЕ СОБЫТИЯ ═══════
+-- Отписываемся от RenderStepped если что-то подписано (не трогаем чужие скрипты)
+-- Но можем замедлить свои Heartbeat
 pcall(function()
-    RunService:Set3dRenderingEnabled(false)  -- Полностью отключает 3D рендеринг!
+    -- Уменьшаем частоту физики (если возможно)
+    settings().Physics.PhysicsEnvironmentalThrottle = Enum.EnviromentalPhysicsThrottle.Disabled
 end)
 
--- ═══════ 3. ОТКЛЮЧИТЬ ЗВУК ═══════
-if Config.DisableAudio then
-    pcall(function()
-        SoundService.RespectFilteringEnabled = true
-        for _, s in pairs(SoundService:GetDescendants()) do
-            if s:IsA("Sound") then s:Destroy() end
-        end
-        SoundService.Volume = 0
-    end)
-end
-
--- ═══════ 4. МИНИМАЛЬНОЕ ОСВЕЩЕНИЕ ═══════
-pcall(function()
-    Lighting.GlobalShadows = false
-    Lighting.Outlines = false
-    Lighting.Brightness = 0
-    Lighting.ClockTime = 12  -- Полдень = меньше вычислений освещения
-    Lighting.FogEnd = 0
-    Lighting.FogStart = 0
-end)
-
--- ═══════ 5. ЗАМОРОЗИТЬ ПЕРСОНАЖА ПОЛНОСТЬЮ ═══════
-local function freezeCharacter(char)
+-- ═══════ 3. ЗАМОРОЗИТЬ ПЕРСОНАЖА (ГЛАВНОЕ ДЛЯ CPU) ═══════
+local function optimizeCharacter(char)
     if not char then return end
     
-    -- Убираем тени
-    for _, obj in pairs(char:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            obj.CastShadow = false
-            obj.CanCollide = false  -- Не считать коллизии
-            obj.Material = Enum.Material.SmoothPlastic  -- Простейший материал
-        elseif obj:IsA("Decal") or obj:IsA("Texture") then
-            obj:Destroy()  -- Удалить текстуры
-        elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") then
-            obj:Destroy()  -- Удалить частицы
-        elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
-            obj:Destroy()  -- Удалить GUI на персонаже
-        end
-    end
-    
-    -- PlatformStand + отключить анимации
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.PlatformStand = true
-        hum.AutoRotate = false
-        hum.WalkSpeed = 0
-        hum.JumpPower = 0
-    end
-    
-    -- Удалить аниматор
-    local animator = char:FindFirstChild("Animator", true)
-    if animator then animator:Destroy() end
-end
-
-player.CharacterAdded:Connect(function(char)
-    task.wait(0.5)
-    freezeCharacter(char)
-end)
-
-if player.Character then
-    freezeCharacter(player.Character)
-end
-
--- ═══════ 6. ОЧИСТИТЬ КАРТУ ОТ ЭФФЕКТОВ ═══════
-if Config.RemoveAllEffects then
-    task.spawn(function()
-        task.wait(3)
-        for _, obj in pairs(Workspace:GetDescendants()) do
-            if obj:IsA("ParticleEmitter") 
-            or obj:IsA("Trail") 
-            or obj:IsA("Smoke") 
-            or obj:IsA("Fire") 
-            or obj:IsA("Sparkles")
-            or obj:IsA("Beam")
-            or obj:IsA("Explosion") then
-                pcall(function() obj:Destroy() end)
-            elseif obj:IsA("BasePart") then
+    -- Убираем всё лишнее с персонажа (уменьшает количество объектов для обработки)
+    if Config.StripCharacter then
+        for _, obj in pairs(char:GetDescendants()) do
+            if obj:IsA("BasePart") then
                 obj.CastShadow = false
-                if obj.Name ~= "HumanoidRootPart" and obj.Name ~= "Head" then
-                    obj.Transparency = 1  -- Сделать невидимым
-                end
+                -- Минимальный размер коллизий уменьшает физику
+                -- НЕ трогаем CanCollide (провалишься)
             elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                obj:Destroy()  -- Меньше объектов = меньше рендеринга и памяти
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") 
+                or obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
                 obj:Destroy()
             elseif obj:IsA("Sound") then
                 obj:Destroy()
             end
         end
-        print("[UltraOpt] Map cleaned")
+    end
+    
+    -- PlatformStand — отключает физику движения персонажа
+    -- Это САМОЕ ВАЖНОЕ для CPU: humanoid не считает гравитацию, коллизии, анимации
+    if Config.FreezeCharacter then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.PlatformStand = true
+            hum.AutoRotate = false
+            hum.WalkSpeed = 0
+            hum.JumpPower = 0
+            -- Отключаем состояния (бег, прыжок, падение)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Running, false)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+            hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+            hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+        end
+        
+        -- Удаляем Animator — он запускает анимации каждый кадр
+        local animator = char:FindFirstChild("Animator", true)
+        if animator then
+            animator:Destroy()
+        end
+        
+        -- Удаляем AnimationController если есть
+        local animController = char:FindFirstChildOfClass("AnimationController")
+        if animController then
+            animController:Destroy()
+        end
+    end
+end
+
+player.CharacterAdded:Connect(function(char)
+    task.wait(0.5)
+    optimizeCharacter(char)
+end)
+
+if player.Character then
+    optimizeCharacter(char)
+end
+
+-- ═══════ 4. ОТКЛЮЧИТЬ ЗВУК (CPU на декодирование аудио) ═══════
+if Config.DisableAudio then
+    pcall(function()
+        SoundService.Volume = 0
+        -- Удаляем все звуки
+        for _, s in pairs(SoundService:GetDescendants()) do
+            if s:IsA("Sound") then
+                s:Destroy()
+            end
+        end
     end)
 end
 
--- ═══════ 7. ОТКЛЮЧИТЬ GUI (чат, меню и т.д.) ═══════
+-- ═══════ 5. УБРАТЬ ЭФФЕКТЫ С КАРТЫ (одноразово) ═══════
+if Config.ReduceMapEffects then
+    task.spawn(function()
+        task.wait(3)  -- Даём карте загрузиться
+        
+        local count = 0
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            local t = obj:IsA("ParticleEmitter") or obj:IsA("Trail") 
+                or obj:IsA("Smoke") or obj:IsA("Fire") 
+                or obj:IsA("Sparkles") or obj:IsA("Beam")
+                or obj:IsA("Explosion")
+            if t then
+                pcall(function()
+                    obj:Destroy()
+                    count = count + 1
+                end)
+            elseif obj:IsA("BasePart") then
+                obj.CastShadow = false  -- Тени считаются на CPU
+            end
+        end
+        
+        print("[CPU Opt] Removed", count, "effects from map")
+    end)
+end
+
+-- ═══════ 6. ОСВЕЩЕНИЕ (меньше вычислений) ═══════
 pcall(function()
-    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+    Lighting.GlobalShadows = false
+    Lighting.Outlines = false
+    Lighting.Brightness = 1
+    Lighting.ClockTime = 12  -- Стабильное освещение = меньше пересчётов
 end)
 
--- ═══════ 8. УБРАТЬ КАМЕРУ (не рендерить сцену) ═══════
-pcall(function()
-    Workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
-    Workspace.CurrentCamera.CFrame = CFrame.new(0, 10000, 0)  -- Улететь в небо
-end)
+-- ═══════ 7. КЕШИРОВАНИЕ (для скриптов которые делают поиски) ═══════
+if Config.CacheReferences then
+    -- Кешируем часто используемые сервисы и пути
+    _G.CachedWorkspace = Workspace
+    _G.CachedPlayers = Players
+    _G.CachedLighting = Lighting
+    
+    -- Кешируем LocalPlayer (уже есть, но на всякий)
+    _G.CachedLocalPlayer = player
+    
+    print("[CPU Opt] References cached")
+end
 
-print("[UltraOpt] Загружено | Инстанс максимально оптимизирован")
+-- ═══════ 8. МОНИТОРИНГ (опционально, для отладки) ═══════
+-- Закомментируй если не нужно
+--[[
+task.spawn(function()
+    while true do
+        task.wait(10)
+        local mem = collectgarbage("count") / 1024
+        print(string.format("[CPU Opt] Memory: %.1f MB | FPS: %d", mem, Config.FPSCap))
+    end
+end)
+--]]
+
+print("[CPU Opt] Loaded | FPS:", Config.FPSCap, "| CPU optimizations active")
